@@ -8,16 +8,16 @@ The core objective is to explore and implement models that bridge neural network
 
 ## 📂 Contents
 
-### 1. `iris_nn/`  
+### 1. `Neural Network for Iris`  
 A simple neural network implemented in JAX to classify the classic Iris dataset. Serves as an initial exploration of JAX’s functional style and autodiff features.
 
-### 2. `nca_jax/`  
+### 2. `NCA Model in JAX`  
 A JAX-based reimplementation of neural cellular automata (inspired by Mordvintsev’s work), including:
-- Differentiable update rules
+- Alive masking and stochastic update components
 - Test cases for model behavior
-- Training loop structure for future RD extensions
+- Tensorflow (original) and JAX test comparisons
 
-### 3. `tbd/`  
+### 3. `TBD`  
 A third major component is currently under development — likely to include experiment modules or tutorial-style examples for a larger simulation framework.
 
 ## 🧪 Goals
@@ -28,7 +28,7 @@ A third major component is currently under development — likely to include exp
 
 ## 📌 About
 
-This project is conducted under the mentorship of researchers in the Erik Winfree Lab at Caltech, focusing on the intersection of ML, synthetic biology, and self-organizing systems.
+This project is conducted under the mentorship of Inhoo Lee and Salvador Buse, both researchers in the Erik Winfree Lab at Caltech, focusing on the intersection of ML, synthetic biology, and self-organizing systems.
 
 ---
 
