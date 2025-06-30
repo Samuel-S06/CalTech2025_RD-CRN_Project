@@ -1,1 +1,117 @@
+import tensorflow as tf
+from tensorflow.keras.layers import Conv2D
+import numpy as np
+import jax
+import jax.numpy as jnp
+from jax import lax
+import time
 
+# Shared Initializer + Weights
+# Generate random normal values for a specific seed
+def shared_initalizer(seed, shape, std=0.1):
+  rng = np.random.default_rng(seed)
+  return rng.normal(loc=0.0, scale=std, size=shape).astype(np.float32)
+
+channel_n=16
+seed1 = int(time.time())
+seed2 = int(time.time())
+
+# Initializes weights and biases (custom)
+w1 = shared_initalizer(seed1, (1,1,48,128))
+b1 = np.zeros((128,), dtype=np.float32)
+w2 = shared_initalizer(seed2, (1,1,128,16))
+b2 = np.zeros((channel_n,), dtype=np.float32)
+
+# ---------------------------------------------------------------------------
+
+# JAX Model
+
+class CAModelJAX:
+  # Modified version of __init__ to take in custom weights and biases
+  def __init__(self, channel_n, w1, b1, w2, b2):
+    self.channel_n = channel_n
+    self.w1 = w1
+    self.b1 = b1
+    self.w2 = w2
+    self.b2 = b2
+
+  # Depthwise Convolution
+  def perceive(self, x, angle):
+    identify = jnp.float32([0,1,0])
+    identify = jnp.outer(identify, identify)
+    dx = jnp.outer(jnp.array([1,2,1]),jnp.array([-1,0,1])) / 8.0
+    dy = dx.T
+    c, s = jnp.cos(angle), jnp.sin(angle)
+    base_filters = jnp.stack([identify, c*dx-s*dy, s*dx+c*dy])
+    kernel = jnp.zeros((3,3,1,self.channel_n*3))
+    for i in range(self.channel_n):
+      for j in range(3):
+        kernel = kernel.at[:,:,0,i*3+j].set(base_filters[j])
+    y = lax.conv_general_dilated(
+          x, # shape: [1,3,3,16]
+          kernel, # shape: [3,3,1,48]
+          window_strides=(1, 1),
+          padding="SAME",
+          dimension_numbers=("NHWC", "HWIO", "NHWC"),
+          feature_group_count=self.channel_n  # depthwise conv here
+          )
+    return y
+
+  # Dense Layer Convolutions
+  def __call__(self, x, angle): # Input x: (1,3,3,16)
+
+    y = self.perceive(x, angle)  # output channels = channel_n * 3 (e.g., 48)
+    y = lax.conv_general_dilated(y, self.w1,
+                                window_strides=(1,1),
+                                padding='SAME',
+                                dimension_numbers=("NHWC", "HWIO", "NHWC")) + self.b1  # Normal conv, output channels=128
+    y = jax.nn.relu(y)
+    y = lax.conv_general_dilated(y, self.w2,
+                                window_strides=(1,1),
+                                padding='SAME',
+                                dimension_numbers=("NHWC", "HWIO", "NHWC")) + self.b2
+
+    return x + y
+
+# ---------------------------------------------------------------------------
+
+# Tensorflow Model
+class NumpyInitializer(tf.keras.initializers.Initializer):
+    def __init__(self, value):
+        self.value = value
+
+    def __call__(self, shape, dtype=None, **kwargs):
+        assert shape == self.value.shape  # doubting if we need this...
+        return tf.convert_to_tensor(self.value, dtype=dtype)
+
+
+class CAModelTF(tf.keras.Model):
+    def __init__(self, channel_n, w1, b1, w2, b2):
+        super().__init__()
+        self.channel_n = channel_n
+        self.dmodel = tf.keras.Sequential([
+            Conv2D(128, 1, activation=tf.nn.relu,
+                   kernel_initializer=NumpyInitializer(w1),
+                   bias_initializer=NumpyInitializer(b1)),
+            Conv2D(self.channel_n, 1, activation=None,
+                   kernel_initializer=NumpyInitializer(w2),
+                   bias_initializer=NumpyInitializer(b2))
+        ])
+
+    @tf.function
+    def perceive(self, x, angle):
+        identify = np.float32([0, 1, 0])
+        identify = np.outer(identify, identify)
+        dx = np.outer([1, 2, 1], [-1, 0, 1]) / 8.0  # Sobel filter
+        dy = dx.T
+        c, s = tf.cos(angle), tf.sin(angle)
+        kernel = tf.stack([identify, c * dx - s * dy, s * dx + c * dy], -1)[:, :, None, :]
+        kernel = tf.repeat(kernel, self.channel_n, 2)
+        y = tf.nn.depthwise_conv2d(x, kernel, [1, 1, 1, 1], 'SAME')
+        return y
+
+    @tf.function
+    def call(self, x):
+        y = self.perceive(x, angle=0.0)
+        dx = self.dmodel(y)
+        return x + dx
