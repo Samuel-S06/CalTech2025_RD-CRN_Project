@@ -1,1 +1,92 @@
+import unittest
+from tensorflow.keras.layers import Conv2D
 
+from NCA_Models import *
+
+class NCA_ModelsTest(unittest.TestCase):
+    def setUp(self):
+        self.x_shared = np.ones((1, 3, 3, channel_n), dtype=np.float32)
+
+        # Tensorflow (TF)
+        self.model_tf = CAModelTF(channel_n, w1, b1, w2, b2)
+        self.x_tf = tf.convert_to_tensor(self.x_shared)
+        self.perceive_tf = self.model_tf.perceive(self.x_tf, angle=0.0)
+
+        # JAX
+        self.model_jax = CAModelJAX(channel_n,
+                               jnp.array(w1), jnp.array(b1),
+                               jnp.array(w2), jnp.array(b2))
+        self.x_jax = jnp.array(self.x_shared)
+        self.perceive_jax = self.model_jax.perceive(self.x_jax, angle=0.0)
+
+
+    def test_Model_outputs_given_same_weights(self):
+        # TF
+        y_tf = self.model_tf(self.x_tf).numpy()
+
+        # JAX
+        y_jax = self.model_jax(self.x_jax, angle=0.0)
+
+        assert  np.allclose(y_tf, np.array(y_jax), atol=1e-7, rtol=1e-6)
+        print("Max abs difference:", np.max(np.abs(y_tf - np.array(y_jax))))
+        print("TF Output: ", np.mean(y_tf))
+        print("JAX Output: ", np.mean(y_jax))
+
+    def test_Model_angle_math(self):
+        angle = np.random.uniform(0.0, 2* np.pi)
+
+        # TF
+        perceive_tf = self.model_tf.perceive(self.x_tf,angle=angle)
+        # JAX
+        perceive_jax = self.model_jax.perceive(self.x_jax,angle=angle)
+
+        assert np.allclose(perceive_tf, np.array(perceive_jax), atol=1e-7, rtol=1e-6)
+
+    def test_Model_perceive_function(self):
+        # TF
+        perceive_tf = self.model_tf.perceive(self.x_tf,angle=0.0)
+        # JAX
+        perceive_jax = self.model_jax.perceive(self.x_jax,angle=0.0)
+
+        assert np.allclose(perceive_tf, np.array(perceive_jax), atol=1e-7, rtol=1e-6)
+
+    def test_Model_Conv_LayerOne(self):
+        # TF
+        dmodel = tf.keras.Sequential([Conv2D(128, 1, activation=tf.nn.relu,
+               kernel_initializer=NumpyInitializer(w1),
+               bias_initializer=NumpyInitializer(b1))])
+        x = dmodel(self.perceive_tf)
+
+        # JAX
+        y = lax.conv_general_dilated(self.perceive_jax, w1,
+                                 window_strides=(1, 1),
+                                 padding='SAME',
+                                 dimension_numbers=(
+                                 "NHWC", "HWIO", "NHWC")) + b1
+        y = jax.nn.relu(y)
+        assert np.allclose(x, y, atol=1e-7, rtol=1e-6)
+
+    def test_Model_Conv_LayerTwo(self):
+        # TF
+        dmodel = tf.keras.Sequential([
+            Conv2D(128, 1, activation=tf.nn.relu,
+                   kernel_initializer=NumpyInitializer(np.zeros(w1.shape)),
+                   bias_initializer=NumpyInitializer(np.zeros(b1.shape))),
+            Conv2D(channel_n, 1, activation=None,
+                   kernel_initializer=NumpyInitializer(w2),
+                   bias_initializer=NumpyInitializer(b2))
+        ])
+        x = dmodel(self.perceive_tf)
+
+        # JAX
+        y = lax.conv_general_dilated(self.perceive_jax, jnp.zeros(w1.shape),
+                                 window_strides=(1, 1),
+                                 padding='SAME',
+                                 dimension_numbers=(
+                                 "NHWC", "HWIO", "NHWC")) + jnp.zeros(b1.shape)
+        y = jax.nn.relu(y)
+        y = lax.conv_general_dilated(y, w2,
+                                     window_strides=(1, 1),
+                                     padding='SAME',
+                                     dimension_numbers=("NHWC", "HWIO", "NHWC")) + b2
+        assert np.allclose(x, y, atol=1e-7, rtol=1e-6)
