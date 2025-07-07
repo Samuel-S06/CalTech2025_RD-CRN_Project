@@ -1,0 +1,45 @@
+import unittest
+from tensorflow.keras.layers import Conv2D
+
+from NCA_Models import *
+
+class NCA_ModelsTest(unittest.TestCase):
+    def setUp(self):
+        self.x_shared = np.ones((1, 3, 3, channel_n), dtype=np.float32)
+
+        # Tensorflow (TF)
+        self.model_tf = CAModelTF(channel_n, w1, b1, w2, b2, 0.5)
+        self.x_tf = tf.convert_to_tensor(self.x_shared)
+        self.perceive_tf = self.model_tf.perceive(self.x_tf, angle=0.0)
+
+        # JAX
+        self.model_jax = CAModelJAX(channel_n,
+                               jnp.array(w1), jnp.array(b1),
+                               jnp.array(w2), jnp.array(b2), 0.5)
+        self.x_jax = jnp.array(self.x_shared)
+        self.perceive_jax = self.model_jax.perceive(self.x_jax, angle=0.0)
+
+    def test_stochastic_alive_masking_output(self):
+        y_tf = self.model_tf(self.x_tf, test_type='stoch alive update').numpy()
+        y_jax = self.model_jax(self.x_jax, test_type='stoch alive update')
+        assert np.allclose(y_tf, y_jax, atol=1e-7, rtol=1e-6)
+
+    # This test should pass MOST times
+    def test_stochastic_update(self):
+        mask_tf = self.model_tf(self.x_tf, test_type='stoch mask').numpy()
+        mask_jax = self.model_jax(self.x_jax, test_type='stoch mask')
+        tf_mask_mean = mask_tf.mean()
+        jax_mask_mean = mask_jax.mean()
+
+        assert abs(tf_mask_mean - fire_rate) <= 0.1 # high tolerance due to small (3x3) grid size
+        assert abs(jax_mask_mean - fire_rate) <= 0.1
+
+    def test_alive_masking(self):
+        life_mask_tf = self.model_tf(self.x_tf, test_type='life mask').numpy()
+        life_mask_jax = self.model_jax(self.x_jax, test_type='life mask')
+        assert np.allclose(life_mask_tf, life_mask_jax, atol=1e-7, rtol=1e-6)
+
+
+
+
+
